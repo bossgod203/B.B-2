@@ -1,0 +1,305 @@
+"""Shared serialization functions for converting DB rows to JSON dicts."""
+from datetime import datetime, timezone
+
+
+def timestamp_text(value):
+    if isinstance(value, datetime):
+        value = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+        return value.strftime('%Y-%m-%d %H:%M:%S')
+    return value
+
+
+
+def serialize_post(
+    row, image_rows=None, liked_by_user=None, quoted_post=None, share_count=0
+):
+    """Convert a posts+users joined row into a JSON-serializable dict.
+    The handle is the user's username (falling back to the email
+    local-part only if username is somehow unset). author_avatar is
+    resolved live from users.profile_picture on every read (not copied into
+    the post row), so changing a profile picture instantly applies to that
+    user's existing posts too — there's no stale per-post copy to update.
+
+    Args:
+        row: tuple from posts JOIN users query (includes audience field,
+            users.profile_picture, users.username, users.bio)
+        image_rows: list of tuples [(image_path,), ...] for this post's images
+        liked_by_user: boolean or int (0/1) indicating if current user liked this post
+        quoted_post: one-level quote payload, unavailable stub, or None
+        share_count: number of existing quote posts referencing this post
+    """
+    if len(row) == 13:
+        # Old format without liked_by_user in row (e.g., from create_post)
+        (post_id, user_id, content, audience, created_at, comment_count,
+         like_count, view_count, full_name, email, profile_picture, username, bio) = row
+        liked = bool(liked_by_user) if liked_by_user is not None else False
+    else:
+        # New format with liked_by_user in row (from get_posts)
+        (post_id, user_id, content, audience, created_at, comment_count,
+         like_count, view_count, full_name, email, profile_picture, username, bio, liked) = row
+        liked = bool(liked)
+
+    # Bug fix: this used to derive the handle unconditionally from the
+    # email local-part, ignoring the username column entirely (same class
+    # of bug as the account switcher's /api/session accounts list) - so an
+    # edited username never appeared on that user's posts. Falls back to
+    # the email prefix only for the (in practice unreachable, since
+    # signup/migration always set one) case where username is somehow
+    # still null - same convention used everywhere else in the app.
+    handle = username or email.split('@')[0]
+    images = [img_row[0] for img_row in image_rows] if image_rows else []
+
+    return {
+        'id': post_id,
+        'user_id': user_id,
+        'content': content,
+        'audience': audience,
+        'created_at': timestamp_text(created_at),
+        'comment_count': comment_count,
+        'like_count': like_count,
+        'view_count': view_count,
+        'author_name': full_name,
+        'author_handle': handle,
+        'author_avatar': profile_picture,
+        'username': username,
+        'bio': bio,
+        'liked_by_user': liked,
+        'images': images,
+        'share_count': int(share_count or 0),
+        'quoted_post': quoted_post,
+    }
+
+
+def serialize_comment(row, liked_by_user=None, disliked_by_user=None):
+    """Convert a comments+users joined row into a JSON-serializable dict.
+
+    Args:
+        row: tuple from comments JOIN users query. Varies by context:
+            - 15 elements: get_comments with liked_by_user, disliked_by_user, image_path
+            - 14 elements: get_comments with liked_by_user and image_path (no dislike join)
+            - 13 elements: create_comment with image_path (no liked/disliked)
+            - 12 elements: legacy format without image_path (backward compat)
+        liked_by_user: Optional int (0/1) from the row's liked_by_user field.
+            If None, the 'liked_by_user' key is omitted from the output (used
+            by create_comment which doesn't return that field). If provided,
+            it's included as a boolean.
+        disliked_by_user: Optional int (0/1) from the row's disliked_by_user
+            field. Same omit-if-None convention as liked_by_user.
+    """
+    image_path = None
+
+    if len(row) == 15:
+        # Row from get_comments with liked_by_user, disliked_by_user, and image_path
+        comment_id, post_id, user_id, content, created_at, like_count, parent_comment_id, full_name, email, profile_picture, username, bio, liked_db, disliked_db, image_path = row
+        liked_by_user = liked_db
+        disliked_by_user = disliked_db
+    elif len(row) == 14:
+        # Row with liked_by_user and image_path (no dislike join)
+        comment_id, post_id, user_id, content, created_at, like_count, parent_comment_id, full_name, email, profile_picture, username, bio, liked_db, image_path = row
+        liked_by_user = liked_db
+    elif len(row) == 13:
+        # Row from create_comment with image_path (no liked/disliked)
+        comment_id, post_id, user_id, content, created_at, like_count, parent_comment_id, full_name, email, profile_picture, username, bio, image_path = row
+    else:
+        # Legacy row without image_path (12 elements)
+        comment_id, post_id, user_id, content, created_at, like_count, parent_comment_id, full_name, email, profile_picture, username, bio = row
+
+    handle = username or email.split('@')[0]
+    result = {
+        'id': comment_id,
+        'post_id': post_id,
+        'user_id': user_id,
+        'author_name': full_name,
+        'author_handle': handle,
+        'author_avatar': profile_picture,
+        'username': username,
+        'bio': bio,
+        'content': content,
+        'created_at': timestamp_text(created_at),
+        'like_count': like_count,
+        'parent_comment_id': parent_comment_id,
+        'image': image_path
+    }
+
+    # Only include liked_by_user/disliked_by_user if provided (either in row or as param)
+    if liked_by_user is not None:
+        result['liked_by_user'] = bool(liked_by_user)
+    if disliked_by_user is not None:
+        result['disliked_by_user'] = bool(disliked_by_user)
+
+    return result
+
+
+def serialize_user_public(row):
+    """Convert a user row into a public profile dict.
+
+    Args:
+        row: tuple (id, full_name, email, profile_picture, cover_image, username, bio)
+    """
+    user_id, full_name, email, profile_picture, cover_image, username, bio = row
+    return {
+        'id': user_id,
+        'full_name': full_name,
+        'handle': username or email.split('@')[0],
+        'profile_picture': profile_picture,
+        'cover_image': cover_image,
+        'username': username,
+        'bio': bio
+    }
+
+
+def serialize_chat_message(row):
+    """Convert a messages row to a JSON dict.
+
+    Args:
+        row: tuple (id, conversation_id, sender_id, body, created_at)
+    """
+    message_id, conversation_id, sender_id, body, created_at = row
+    return {
+        'id': message_id,
+        'conversation_id': conversation_id,
+        'sender_id': sender_id,
+        'body': body,
+        'created_at': timestamp_text(created_at),
+    }
+
+
+def serialize_conversation(conv_row, other_user_row, last_message_row,
+                           unread_count, viewer_id):
+    """Shape one conversation-list item.
+
+    Args:
+        conv_row: tuple (id, user_low_id, user_high_id, created_at)
+        other_user_row: the OTHER participant's users row (7-element shape
+            accepted by serialize_user_public)
+        last_message_row: tuple (id, sender_id, body, created_at) or None
+            for a conversation with no messages yet
+        unread_count: messages newer than the viewer's read cursor that
+            the viewer did not send
+        viewer_id: current user; only used to pick which participant is
+            "the other user"
+    """
+    conversation_id = conv_row[0]
+    other = serialize_user_public(other_user_row) if other_user_row else None
+    last_message = None
+    if last_message_row is not None:
+        last_message = {
+            'id': last_message_row[0],
+            'sender_id': last_message_row[1],
+            'body': last_message_row[2],
+            'created_at': timestamp_text(last_message_row[3]),
+        }
+    return {
+        'id': conversation_id,
+        'user': {
+            'id': other['id'],
+            'full_name': other['full_name'],
+            'handle': other['handle'],
+            'profile_picture': other['profile_picture'],
+        } if other else None,
+        'last_message': last_message,
+        'unread_count': unread_count,
+    }
+
+
+def serialize_library_file(row, uploader_name=None):
+    """Convert a library_files row into a JSON-serializable dict.
+
+    Args:
+        row: tuple from library_files (may or may not include joined user data)
+        uploader_name: string, the uploader's display name (full_name)
+    """
+    (file_id, user_id, title, category, department, course, level,
+     file_path, file_type, file_size, status, download_count, created_at) = row[:13]
+
+    return {
+        'id': file_id,
+        'title': title,
+        'category': category,
+        'department': department or '',
+        'course': course or '',
+        'level': level or '',
+        'file_type': file_type,
+        'file_size': file_size,
+        'status': status,
+        'uploader_id': user_id,
+        'uploader_name': uploader_name or '',
+        'created_at': timestamp_text(created_at),
+        'download_count': download_count
+    }
+
+
+def _iso_utc(value):
+    """Turn a naive-UTC datetime (or a stored 'YYYY-MM-DD HH:MM:SS' string) into an
+    unambiguous ISO-8601 UTC timestamp ('...T...Z') so clients don't have to guess
+    the timezone of SQLite's bare timestamps."""
+    if value is None:
+        return None
+    if hasattr(value, 'strftime'):
+        return timestamp_text(value).replace(' ', 'T') + 'Z'
+    return str(value).replace(' ', 'T') + 'Z'
+
+
+def serialize_credit_transaction(row):
+    """Convert a credit_transactions row to a JSON-serializable dict.
+
+    Args:
+        row: tuple (id, amount, kind, reason, description, created_at)
+    """
+    transaction_id, amount, kind, reason, description, created_at = row
+    return {
+        'id': transaction_id,
+        'amount': amount,
+        'kind': kind,
+        'reason': reason,
+        'description': description,
+        'created_at': _iso_utc(created_at),
+    }
+
+
+def serialize_monthly_reward(status):
+    """Shape wallet.get_monthly_reward_status() output for the API."""
+    return {
+        'amount': status['amount'],
+        'claimable': status['claimable'],
+        'next_claim_at': _iso_utc(status['next_claim_at']),
+        'last_claimed_at': _iso_utc(status['last_claimed_at']),
+    }
+
+
+def serialize_community(row, icon_bg, viewer_role, icon_image=None, cover_image=None, notification_level=None):
+    """Convert a communities row (+ member count) to the shape
+    static/js/community.js expects.
+
+    Args:
+        row: tuple (id, slug, name, description, topic, type, icon_emoji,
+            created_at, member_count)
+        icon_bg: Tailwind class picked from the topic palette
+            (community_service.TOPIC_STYLES) - derived, not stored.
+        viewer_role: 'creator' / 'moderator' / 'member', or None for a
+            non-member or logged-out viewer.
+
+    `id` is the slug on purpose: the frontend uses id and slug
+    interchangeably as the URL param. The integer PK never leaves the server.
+    """
+    (_pk, slug, name, description, topic, community_type, icon_emoji,
+     created_at, member_count) = row
+    return {
+        'id': slug,
+        'slug': slug,
+        'name': name,
+        'description': description,
+        'topic': topic,
+        'type': community_type,
+        'icon_emoji': icon_emoji,
+        'icon_bg': icon_bg,
+        'member_count': member_count,
+        'created_at': _iso_utc(created_at),
+        'icon_image': icon_image,
+        'cover_image': cover_image,
+        'membership': {
+            'is_member': viewer_role is not None,
+            'role': viewer_role,
+            'notification_level': notification_level if viewer_role is not None else None,
+        },
+    }

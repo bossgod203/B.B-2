@@ -1,0 +1,77 @@
+<!-- BEGIN: Chat Conversation View -->
+<!-- Thread, opened by tapping a row in the Chat > Messages list
+     (openChatConversation in chat.js). Real 1:1 DMs are loaded/sent through
+     /api/chat/* (chat-sync.js); groups are still client-side only. Full-screen (bottom nav hidden - this view is not in
+     BOTTOM_NAV_ACTIVE_ITEM); header + composer fixed, thread scrolls. -->
+<div id="chat-conversation-view" class="view-section bg-white">
+
+	<!-- Header: back, avatar, name + presence, search, more -->
+	<header class="shrink-0 bg-white border-b border-gray-100 flex items-center px-3 py-3">
+		<button id="chat-conv-back-btn" type="button" class="w-10 h-10 -ml-1 flex items-center justify-center text-gray-700 active:scale-95 transition-transform duration-100 shrink-0" onclick="closeChatConversation()" aria-label="Back">
+			<svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M10 19l-7-7m0 0l7-7m-7 7h18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+		</button>
+		<!-- Avatar + name: for groups this opens Group info (chat-group-info.js); inert for 1:1 chats. -->
+		<div id="chat-conv-title-btn" class="flex items-center flex-1 min-w-0 cursor-pointer" role="button" tabindex="0" onclick="openChatGroupInfo()" onkeydown="if (event.key === 'Enter') openChatGroupInfo()">
+		<img id="chat-conv-avatar" src="" alt="" class="w-12 h-12 rounded-full object-cover bg-gray-100 shrink-0 ml-1">
+		<div class="flex-1 min-w-0 ml-3">
+			<h1 id="chat-conv-name" class="text-[18px] font-bold text-gray-900 leading-tight truncate"></h1>
+			<p id="chat-conv-status" class="flex items-center text-[14px] text-gray-500 leading-tight mt-0.5">
+				<span id="chat-conv-dot" class="w-2.5 h-2.5 rounded-full bg-green-500 mr-1.5 shrink-0"></span>
+				<span id="chat-conv-status-text">Online</span>
+			</p>
+		</div>
+		</div>
+		<button id="chat-conv-search-btn" type="button" class="w-10 h-10 flex items-center justify-center text-gray-700 active:scale-95 transition-transform duration-100 shrink-0" onclick="showToast('Coming soon')" aria-label="Search in conversation">
+			<svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+		</button>
+		<button id="chat-conv-menu-btn" type="button" class="w-10 h-10 -mr-1 flex items-center justify-center text-gray-700 active:scale-95 transition-transform duration-100 shrink-0" onclick="showToast('Coming soon')" aria-label="More options">
+			<svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+		</button>
+	</header>
+	<div id="chat-conv-offline-banner" class="hidden shrink-0 px-4 py-1.5 text-center text-[13px] text-gray-600 bg-gray-100" role="status">Connection lost. Reconnecting…</div>
+
+	<!-- Thread (filled by renderChatConversation) -->
+	<div id="chat-conv-scroll" class="flex-1 overflow-y-auto px-4 pt-5 pb-4">
+		<!-- Day of the first loaded message (set by renderChatConversation); hidden when empty. -->
+		<div id="chat-conv-day" class="flex justify-center mb-6">
+			<span id="chat-conv-day-label" class="px-4 py-1 rounded-full bg-gray-100 text-[14px] text-gray-500">Today</span>
+		</div>
+		<div id="chat-conv-thread" class="space-y-5"></div>
+	</div>
+
+	<!-- Reply preview (shown by the Reply message action; see renderChatReplyBar) -->
+	<div id="chat-reply-bar" class="hidden shrink-0 bg-white border-t border-gray-100 px-4 pt-3 flex items-center gap-3">
+		<div class="flex-1 min-w-0 border-l-[3px] border-brand-red pl-3">
+			<p id="chat-reply-bar-name" class="text-[14px] font-semibold text-brand-red truncate"></p>
+			<p id="chat-reply-bar-text" class="text-[14px] text-gray-500 truncate"></p>
+		</div>
+		<button id="chat-reply-cancel-btn" type="button" class="w-8 h-8 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center shrink-0 active:scale-95 transition-transform duration-100" onclick="clearChatReplyTarget()" aria-label="Cancel reply">
+			<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+		</button>
+	</div>
+
+	<!-- Composer -->
+	<div id="chat-conv-composer" class="shrink-0 bg-white border-t border-gray-100 px-3 pt-2.5 flex items-center gap-3" style="padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));">
+		<div class="flex-1 min-w-0 h-11 rounded-full bg-gray-100 flex items-center pl-4 pr-4">
+			<button id="chat-conv-gif-btn" type="button" class="text-gray-500 shrink-0 mr-2 active:scale-95 transition-transform duration-100" onclick="toggleChatGifPicker()" aria-label="GIF" aria-controls="chat-gif-picker" aria-expanded="false">
+				<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M174.92,156c-10.29,17.79-27.39,28-46.92,28s-36.63-10.2-46.93-28a8,8,0,1,1,13.86-8c7.46,12.91,19.2,20,33.07,20s25.61-7.1,33.08-20a8,8,0,1,1,13.84,8ZM232,128a104.35,104.35,0,0,1-4.56,30.56,8,8,0,0,1-2,3.31l-63.57,63.57a7.9,7.9,0,0,1-3.3,2A104,104,0,1,1,232,128Zm-16,0a87.89,87.89,0,1,0-64,84.69L212.69,152A88.05,88.05,0,0,0,216,128ZM92,120a12,12,0,1,0-12-12A12,12,0,0,0,92,120Zm72-24a12,12,0,1,0,12,12A12,12,0,0,0,164,96Z"></path></svg>
+			</button>
+			<input id="chat-conv-input" type="text" enterkeyhint="send" autocomplete="off" placeholder="Type a message..." class="flex-1 min-w-0 h-full bg-transparent border-0 p-0 shadow-none outline-none focus:outline-none focus:ring-0 focus:border-0 appearance-none text-[16px] text-gray-900 placeholder-gray-500" onkeydown="if (event.key === 'Enter') { event.preventDefault(); sendChatMessage(); }">
+			<!-- Trailing actions, in order: add file, camera (all "Coming soon") -->
+			<div class="flex items-center gap-2.5 shrink-0 ml-2 text-gray-500">
+				<button id="chat-conv-attach-btn" type="button" class="shrink-0 active:scale-95 transition-transform duration-100" onclick="showToast('Coming soon')" aria-label="Add file">
+					<svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+				</button>
+				<button id="chat-conv-camera-btn" type="button" class="shrink-0 active:scale-95 transition-transform duration-100" onclick="showToast('Coming soon')" aria-label="Camera">
+					<svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 015.5 6h1.4a1 1 0 00.8-.4l.9-1.2A1 1 0 019.4 4h5.2a1 1 0 01.8.4l.9 1.2a1 1 0 00.8.4h1.4A2.5 2.5 0 0121 8.5v8A2.5 2.5 0 0118.5 19h-13A2.5 2.5 0 013 16.5v-8z" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="12" cy="12.5" r="3.5"></circle></svg>
+				</button>
+			</div>
+		</div>
+		<button id="chat-conv-send-btn" type="button" class="w-12 h-12 rounded-full bg-brand-red text-white flex items-center justify-center shrink-0 active:scale-95 transition-transform duration-100" onclick="sendChatMessage()" aria-label="Send message">
+			<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"></path></svg>
+		</button>
+	</div>
+
+	{% include "partials/chat_gif_picker.html" %}
+</div>
+<!-- END: Chat Conversation View -->

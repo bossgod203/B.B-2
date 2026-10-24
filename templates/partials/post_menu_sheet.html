@@ -1,0 +1,48 @@
+<!-- BEGIN: Post Action Menu Bottom Sheet -->
+<div id="post-menu-backdrop" class="hidden fixed inset-0 z-40 bg-black/20 transition-opacity" onclick="closePostMenu()"></div>
+<div id="post-menu-sheet" class="hidden fixed left-0 right-0 bottom-0 z-50 bg-white rounded-t-[24px] shadow-[0_-8px_24px_rgba(0,0,0,0.12)] pt-2 pb-6 max-w-[430px] mx-auto transition-transform origin-bottom" role="dialog" aria-modal="true" aria-label="Post options">
+	<div class="w-12 h-1 bg-gray-200 rounded-full mx-auto mb-2"></div>
+	<div class="py-2">
+		<button type="button" class="post-menu-action group w-full flex items-center gap-4 px-5 py-3.5 text-left transition-colors duration-100 active:bg-gray-50" data-action="save">
+			<span class="post-menu-icon w-6 flex items-center justify-center text-gray-700 transition-transform duration-150 group-active:scale-90"><i class="fa-regular fa-bookmark text-[18px]"></i></span>
+			<span class="text-[15px] font-medium text-gray-900">Save post</span>
+		</button>
+		<button type="button" class="post-menu-action group w-full flex items-center gap-4 px-5 py-3.5 text-left transition-colors duration-100 active:bg-gray-50" data-action="share">
+			<span class="post-menu-icon w-6 flex items-center justify-center text-gray-700 transition-transform duration-150 group-active:scale-90"><svg class="w-[22px] h-[22px]" fill="currentColor" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg"><path d="M237.66,106.35l-80-80A8,8,0,0,0,144,32V72.35c-25.94,2.22-54.59,14.92-78.16,34.91-28.38,24.08-46.05,55.11-49.76,87.37a12,12,0,0,0,20.68,9.58h0c11-11.71,50.14-48.74,107.24-52V192a8,8,0,0,0,13.66,5.65l80-80A8,8,0,0,0,237.66,106.35ZM160,172.69V144a8,8,0,0,0-8-8c-28.08,0-55.43,7.33-81.29,21.8a196.17,196.17,0,0,0-36.57,26.52c5.8-23.84,20.42-46.51,42.05-64.86C99.41,99.77,127.75,88,152,88a8,8,0,0,0,8-8V51.32L220.69,112Z"></path></svg></span>
+			<span class="text-[15px] font-medium text-gray-900">Share post</span>
+		</button>
+		<button type="button" class="post-menu-action group w-full flex items-center gap-4 px-5 py-3.5 text-left transition-colors duration-100 active:bg-gray-50" data-action="copy-link">
+			<span class="post-menu-icon w-6 flex items-center justify-center text-gray-700 transition-transform duration-150 group-active:scale-90"><i class="fa-solid fa-link text-[18px]"></i></span>
+			<span class="text-[15px] font-medium text-gray-900">Copy link</span>
+		</button>
+	</div>
+	<div class="border-t border-gray-100 py-2">
+		<button type="button" class="post-menu-action group w-full flex items-center gap-4 px-5 py-3.5 text-left transition-colors duration-100 active:bg-gray-50" data-action="hide">
+			<span class="post-menu-icon w-6 flex items-center justify-center text-gray-700 transition-transform duration-150 group-active:scale-90"><i class="fa-regular fa-eye-slash text-[18px]"></i></span>
+			<span>
+				<span class="block text-[15px] font-medium text-gray-900">Hide post</span>
+				<span class="block text-[13px] text-gray-400">See fewer posts like this</span>
+			</span>
+		</button>
+		<button type="button" class="post-menu-action group w-full flex items-center gap-4 px-5 py-3.5 text-left transition-colors duration-100 active:bg-gray-50" data-action="not-interested">
+			<span class="post-menu-icon w-6 flex items-center justify-center text-gray-700 transition-transform duration-150 group-active:scale-90"><i class="fa-solid fa-ban text-[18px]"></i></span>
+			<span>
+				<span class="block text-[15px] font-medium text-gray-900">Not interested</span>
+				<span class="block text-[13px] text-gray-400">Don't show posts like this</span>
+			</span>
+		</button>
+	</div>
+	<div class="border-t border-gray-100 py-2">
+		<button type="button" class="post-menu-action group w-full flex items-center gap-4 px-5 py-3.5 text-left transition-colors duration-100 active:bg-gray-50" data-action="report">
+			<span class="post-menu-icon w-6 flex items-center justify-center text-gray-700 transition-transform duration-150 group-active:scale-90"><i class="fa-regular fa-flag text-[18px]"></i></span>
+			<span>
+				<span class="block text-[15px] font-medium text-gray-900">Report post</span>
+				<span class="block text-[13px] text-gray-400">Report this to the admins</span>
+			</span>
+		</button>
+	</div>
+	<div class="border-t border-gray-100 pt-2 px-3">
+		<button type="button" id="post-menu-cancel-btn" class="w-full py-3.5 text-center text-[15px] font-semibold text-gray-500 rounded-xl transition-colors duration-100 active:bg-gray-100">Cancel</button>
+	</div>
+</div>
+<!-- END: Post Action Menu Bottom Sheet -->

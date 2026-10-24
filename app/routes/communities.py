@@ -1,0 +1,201 @@
+"""Communities HTTP layer. Logic lives in app/community_service.py.
+
+GET /api/communities/<slug>, /members, and /posts are readable while
+logged out (like GET /api/posts); everything else requires a session.
+Mutating routes go through the global csrf_protect() in app/__init__.py.
+"""
+from flask import Blueprint, request, jsonify, session
+from app.db import get_db
+from app import community_service as communities
+from psycopg_pool import PoolTimeout
+
+
+bp = Blueprint('communities', __name__)
+
+
+def _require_login():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Authentication required'}), 401
+    return None
+
+
+def _clamp_limit(limit_param):
+    try:
+        limit = int(limit_param) if limit_param is not None else communities.DEFAULT_POSTS_LIMIT
+    except (TypeError, ValueError):
+        limit = communities.DEFAULT_POSTS_LIMIT
+    return max(1, min(limit, communities.MAX_POSTS_LIMIT))
+
+
+def _parse_cursor(cursor_param):
+    try:
+        return int(cursor_param) if cursor_param not in (None, '') else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _call(fn, *args, success_status=200):
+    """Run a service call on a fresh connection and map its exceptions
+    onto the app's usual {"error": ...} responses."""
+    conn = get_db()
+    try:
+        return jsonify(fn(conn, *args)), success_status
+    except communities.CommunityValidationError as e:
+        return jsonify({'error': str(e)}), 400
+    except communities.CommunityPermissionError as e:
+        return jsonify({'error': str(e)}), 403
+    except communities.CommunityNotFoundError as e:
+        return jsonify({'error': str(e)}), 404
+    except PoolTimeout:
+        raise
+    except Exception as e:
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
+    finally:
+        conn.close()
+
+
+@bp.route('/api/communities', methods=['GET'])
+def list_communities():
+    q = request.args.get('q')
+    limit = _clamp_limit(request.args.get('limit'))
+    cursor_id = _parse_cursor(request.args.get('cursor'))
+
+    def page(conn):
+        comms, next_cursor = communities.list_communities(conn, session.get('user_id'), q, limit, cursor_id)
+        return {'communities': comms, 'next_cursor': next_cursor}
+    return _call(page)
+
+
+@bp.route('/api/communities', methods=['POST'])
+def create_community():
+    auth_error = _require_login()
+    if auth_error:
+        return auth_error
+    data = request.get_json(silent=True) or {}
+    return _call(
+        communities.create_community, session['user_id'],
+        data.get('name'), data.get('description'), data.get('topic'), data.get('type'),
+        success_status=201
+    )
+
+
+# Registered before /<slug> for readability; Flask already prefers the
+# static segment, and 'mine' is a reserved slug in community_service.
+@bp.route('/api/communities/mine', methods=['GET'])
+def my_communities():
+    auth_error = _require_login()
+    if auth_error:
+        return auth_error
+    return _call(lambda conn, uid: {'communities': communities.list_my_communities(conn, uid)},
+                 session['user_id'])
+
+
+@bp.route('/api/communities/<slug>', methods=['GET'])
+def get_community(slug):
+    return _call(communities.get_community, slug, session.get('user_id'))
+
+
+@bp.route('/api/communities/<slug>/join', methods=['POST'])
+def join_community(slug):
+    auth_error = _require_login()
+    if auth_error:
+        return auth_error
+    return _call(communities.join_community, slug, session['user_id'])
+
+
+@bp.route('/api/communities/<slug>/leave', methods=['POST'])
+def leave_community(slug):
+    auth_error = _require_login()
+    if auth_error:
+        return auth_error
+    return _call(communities.leave_community, slug, session['user_id'])
+
+
+@bp.route('/api/communities/<slug>/notifications', methods=['PUT'])
+def set_community_notifications(slug):
+    auth_error = _require_login()
+    if auth_error:
+        return auth_error
+    data = request.get_json(silent=True) or {}
+    return _call(communities.set_notification_level, slug, session['user_id'], data.get('level'))
+
+
+@bp.route('/api/communities/<slug>/icon', methods=['POST'])
+def update_community_icon(slug):
+    auth_error = _require_login()
+    if auth_error:
+        return auth_error
+    return _call(communities.update_community_image, slug, session['user_id'], 'icon', request.files.get('image'))
+
+
+@bp.route('/api/communities/<slug>/cover', methods=['POST'])
+def update_community_cover(slug):
+    auth_error = _require_login()
+    if auth_error:
+        return auth_error
+    return _call(communities.update_community_image, slug, session['user_id'], 'cover', request.files.get('image'))
+
+
+@bp.route('/api/communities/<slug>/posts', methods=['GET'])
+def list_community_posts(slug):
+    limit = _clamp_limit(request.args.get('limit'))
+    cursor_id = _parse_cursor(request.args.get('cursor'))
+
+    def page(conn, s, viewer_id):
+        posts, next_cursor = communities.list_community_posts(conn, s, viewer_id, limit, cursor_id)
+        return {'posts': posts, 'next_cursor': next_cursor}
+    return _call(page, slug, session.get('user_id'))
+
+
+@bp.route('/api/communities/<slug>/posts', methods=['POST'])
+def create_community_post(slug):
+    auth_error = _require_login()
+    if auth_error:
+        return auth_error
+
+    # Accept JSON or multipart, mirroring routes/posts.py::create_post
+    is_multipart = request.content_type and 'multipart/form-data' in request.content_type
+    if is_multipart:
+        content = request.form.get('content')
+        audience = request.form.get('audience', '')  # ignored for community posts
+        files = request.files.getlist('images')
+        quoted_post_id = request.form.get('quoted_post_id')
+    else:
+        data = request.get_json(silent=True) or {}
+        content = data.get('content')
+        audience = data.get('audience', '')
+        files = []
+        quoted_post_id = data.get('quoted_post_id')
+
+    return _call(communities.create_community_post, slug, session['user_id'],
+                 content, audience, files, quoted_post_id, success_status=201)
+
+
+@bp.route('/api/communities/<slug>/members', methods=['GET'])
+def list_community_members(slug):
+    return _call(communities.list_community_members, slug, session.get('user_id'))
+
+
+@bp.route('/api/communities/<slug>/members/all', methods=['GET'])
+def list_all_community_members(slug):
+    q = request.args.get('q')
+    limit = _clamp_limit(request.args.get('limit'))
+    try:
+        offset = max(0, int(request.args.get('offset', 0)))
+    except (TypeError, ValueError):
+        offset = 0
+    return _call(communities.list_all_community_members, slug, session.get('user_id'), q, limit, offset)
+
+
+@bp.route('/api/communities/<slug>/members', methods=['POST'])
+def add_member(slug):
+    auth_error = _require_login()
+    if auth_error: return auth_error
+    data = request.get_json(silent=True) or {}
+    return _call(communities.add_member, slug, session['user_id'], data.get('username'), success_status=201)
+
+@bp.route('/api/communities/<slug>/members/<username>', methods=['DELETE'])
+def remove_member(slug, username):
+    auth_error = _require_login()
+    if auth_error: return auth_error
+    return _call(communities.remove_member, slug, session['user_id'], username)

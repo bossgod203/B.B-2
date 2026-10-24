@@ -1,0 +1,286 @@
+{
+  "comments": [
+    {
+      "id": 1,
+      "post_id": 3,
+      "user_id": 1,
+      "content": "This is my first comment!",
+      "created_at": "2026-08-20 17:53:04+00:00",
+      "like_count": 0,
+      "parent_comment_id": null,
+      "image_path": null
+    },
+    {
+      "id": 2,
+      "post_id": 3,
+      "user_id": 1,
+      "content": "This is my second comment with more detail about the post.",
+      "created_at": "2026-08-20 17:53:04+00:00",
+      "like_count": 0,
+      "parent_comment_id": null,
+      "image_path": null
+    },
+    {
+      "id": 3,
+      "post_id": 4,
+      "user_id": 6,
+      "content": "Testing comment after session fix!",
+      "created_at": "2026-08-20 19:46:45+00:00",
+      "like_count": 0,
+      "parent_comment_id": null,
+      "image_path": null
+    },
+    {
+      "id": 4,
+      "post_id": 4,
+      "user_id": 4,
+      "content": "Lmao, wtf is a persistent tester? \ud83d\ude02",
+      "created_at": "2026-08-20 19:49:05+00:00",
+      "like_count": 0,
+      "parent_comment_id": null,
+      "image_path": null
+    },
+    {
+      "id": 5,
+      "post_id": 4,
+      "user_id": 4,
+      "content": "It works tho",
+      "created_at": "2026-08-21 10:20:12+00:00",
+      "like_count": 0,
+      "parent_comment_id": null,
+      "image_path": null
+    },
+    {
+      "id": 10,
+      "post_id": 13,
+      "user_id": 14,
+      "content": "Test comment",
+      "created_at": "2026-08-24 15:29:11+00:00",
+      "like_count": 0,
+      "parent_comment_id": null,
+      "image_path": null
+    },
+    {
+      "id": 11,
+      "post_id": 15,
+      "user_id": 20,
+      "content": "Test comment",
+      "created_at": "2026-08-24 15:41:18+00:00",
+      "like_count": 0,
+      "parent_comment_id": null,
+      "image_path": null
+    },
+    {
+      "id": 12,
+      "post_id": 19,
+      "user_id": 35,
+      "content": "Test comment for race condition",
+      "created_at": "2026-08-25 18:56:38+00:00",
+      "like_count": 0,
+      "parent_comment_id": null,
+      "image_path": null
+    },
+    {
+      "id": 13,
+      "post_id": 23,
+      "user_id": 51,
+      "content": "Test comment for race condition",
+      "created_at": "2026-08-25 19:03:50+00:00",
+      "like_count": 0,
+      "parent_comment_id": null,
+      "image_path": null
+    },
+    {
+      "id": 14,
+      "post_id": 24,
+      "user_id": 52,
+      "content": "Test comment for race condition",
+      "created_at": "2026-08-25 19:04:06+00:00",
+      "like_count": 1,
+      "parent_comment_id": null,
+      "image_path": null
+    }
+  ],
+  "highlights": [
+    {
+      "id": 2,
+      "user_id": 9,
+      "title": "Winter Fun",
+      "kind": "photo",
+      "media_url": "/static/uploads/766f49de-7133-4d26-af92-aa36154f464c.jpg",
+      "created_at": "2026-08-24 13:29:11+00:00"
+    },
+    {
+      "id": 3,
+      "user_id": 11,
+      "title": "My Video Highlight",
+      "kind": "video",
+      "media_url": "/static/uploads/b21e1b76-f915-41e8-b09c-93cae8f5fa21.mp4",
+      "created_at": "2026-08-24 13:30:18+00:00"
+    }
+  ],
+  "likes": [
+    {
+      "id": 128,
+      "user_id": 35,
+      "target_type": "post",
+      "target_id": 19,
+      "created_at": "2026-08-25 18:56:38+00:00"
+    },
+    {
+      "id": 132,
+      "user_id": 51,
+      "target_type": "post",
+      "target_id": 23,
+      "created_at": "2026-08-25 19:03:50+00:00"
+    },
+    {
+      "id": 136,
+      "user_id": 52,
+      "target_type": "post",
+      "target_id": 24,
+      "created_at": "2026-08-25 19:04:06+00:00"
+    },
+    {
+      "id": 139,
+      "user_id": 52,
+      "target_type": "comment",
+      "target_id": 14,
+      "created_at": "2026-08-25 19:04:06+00:00"
+    }
+  ],
+  "posts": [
+    {
+      "id": 1,
+      "user_id": 5,
+      "content": "Hello Beebo! This is my first dynamic post from curl verification.",
+      "created_at": "Academic",
+      "comment_count": "2026-08-20 16:46:47+00:00",
+      "like_count": 0,
+      "view_count": 0,
+      "audience": 0,
+      "community_id": null,
+      "quoted_post_id": null
+    },
+    {
+      "id": 3,
+      "user_id": 1,
+      "content": "This is a test post for comments",
+      "created_at": "Academic",
+      "comment_count": "2026-08-20 17:53:04+00:00",
+      "like_count": 2,
+      "view_count": 0,
+      "audience": 0,
+      "community_id": null,
+      "quoted_post_id": null
+    },
+    {
+      "id": 4,
+      "user_id": 6,
+      "content": "Testing session persistence after reload!",
+      "created_at": "Academic",
+      "comment_count": "2026-08-20 19:31:29+00:00",
+      "like_count": 3,
+      "view_count": 0,
+      "audience": 0,
+      "community_id": null,
+      "quoted_post_id": null
+    },
+    {
+      "id": 13,
+      "user_id": 14,
+      "content": "Test post with username and bio",
+      "created_at": "Academic",
+      "comment_count": "2026-08-24 15:29:11+00:00",
+      "like_count": 1,
+      "view_count": 0,
+      "audience": 0,
+      "community_id": null,
+      "quoted_post_id": null
+    },
+    {
+      "id": 14,
+      "user_id": 16,
+      "content": "Testing username and bio in posts!",
+      "created_at": "General",
+      "comment_count": "2026-08-24 15:39:51+00:00",
+      "like_count": 0,
+      "view_count": 0,
+      "audience": 0,
+      "community_id": null,
+      "quoted_post_id": null
+    },
+    {
+      "id": 15,
+      "user_id": 20,
+      "content": "Final test post",
+      "created_at": "General",
+      "comment_count": "2026-08-24 15:41:18+00:00",
+      "like_count": 1,
+      "view_count": 0,
+      "audience": 0,
+      "community_id": null,
+      "quoted_post_id": null
+    },
+    {
+      "id": 19,
+      "user_id": 35,
+      "content": "Test post for race condition",
+      "created_at": "General",
+      "comment_count": "2026-08-25 18:56:38+00:00",
+      "like_count": 1,
+      "view_count": 1,
+      "audience": 0,
+      "community_id": null,
+      "quoted_post_id": null
+    },
+    {
+      "id": 23,
+      "user_id": 51,
+      "content": "Test post for race condition",
+      "created_at": "General",
+      "comment_count": "2026-08-25 19:03:50+00:00",
+      "like_count": 1,
+      "view_count": 1,
+      "audience": 0,
+      "community_id": null,
+      "quoted_post_id": null
+    },
+    {
+      "id": 24,
+      "user_id": 52,
+      "content": "Test post for race condition",
+      "created_at": "General",
+      "comment_count": "2026-08-25 19:04:06+00:00",
+      "like_count": 1,
+      "view_count": 1,
+      "audience": 0,
+      "community_id": null,
+      "quoted_post_id": null
+    },
+    {
+      "id": 29,
+      "user_id": 65,
+      "content": "Test post for like",
+      "created_at": "General",
+      "comment_count": "2026-08-25 19:24:23+00:00",
+      "like_count": 0,
+      "view_count": 0,
+      "audience": 0,
+      "community_id": null,
+      "quoted_post_id": null
+    },
+    {
+      "id": 30,
+      "user_id": 65,
+      "content": "Test with CSRF",
+      "created_at": "General",
+      "comment_count": "2026-08-25 19:24:23+00:00",
+      "like_count": 0,
+      "view_count": 0,
+      "audience": 0,
+      "community_id": null,
+      "quoted_post_id": null
+    }
+  ]
+}

@@ -1,0 +1,786 @@
+"""Post, comment, and like domain logic.
+
+Deliberately independent of Flask (a plain psycopg connection in, plain
+values out), matching app/wallet.py, app/library_service.py,
+app/search_service.py, and app/user_service.py's shape. As in
+library_service.py and user_service.py, image uploads accept a
+werkzeug-style file object (.filename, .content_type, .seek()/.tell(),
+.save(path)) rather than importing Flask directly.
+
+delete_post predates the rest of this file - it was extracted from
+app/routes/users.py (where the DELETE /api/posts/<id> route still lives;
+see that file's docstring for why). Everything else here is extracted
+from app/routes/posts.py, which is now the thin HTTP layer.
+"""
+import os
+import uuid
+
+from werkzeug.utils import secure_filename
+
+from app.serializers import timestamp_text, serialize_post, serialize_comment
+from app.community_access import post_community, viewer_role, can_view, can_interact
+
+UPLOAD_FOLDER = 'static/uploads'
+ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5MB
+MAX_IMAGES_PER_POST = 4
+MAX_CONTENT_LEN = 2000
+MAX_COMMENT_LEN = 1000
+VALID_AUDIENCES = {'Academic', 'Announcements', 'Events', 'Community', 'General'}
+DEFAULT_AUDIENCE = 'Academic'
+
+DEFAULT_POSTS_LIMIT = 20
+MAX_POSTS_LIMIT = 50
+
+
+class PostNotFoundError(Exception):
+    """A 404: no such post."""
+
+
+class PostOwnershipError(Exception):
+    """A 403: the post exists but isn't the requester's."""
+
+
+class PostValidationError(Exception):
+    """A 400: bad input. str(err) is the user-facing message."""
+
+
+class CommentNotFoundError(Exception):
+    """A 404: no such comment (the target comment, or a referenced
+    parent_comment_id)."""
+
+
+class CommentOwnershipError(Exception):
+    """A 403: the comment exists but isn't the requester's."""
+
+class PostAccessError(Exception):
+    pass
+
+
+def _parse_quoted_post_id(value):
+    """Normalize the quote id accepted by JSON and multipart requests.
+
+    JSON numbers must be actual integers; multipart values arrive as strings.
+    Keeping this validation in the service also protects callers that bypass
+    the HTTP layer.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise PostValidationError('Invalid quoted_post_id')
+    if isinstance(value, int):
+        quoted_post_id = value
+    elif isinstance(value, str):
+        try:
+            quoted_post_id = int(value.strip())
+        except (TypeError, ValueError):
+            raise PostValidationError('Invalid quoted_post_id')
+    else:
+        raise PostValidationError('Invalid quoted_post_id')
+
+    if quoted_post_id < 1:
+        raise PostValidationError('Invalid quoted_post_id')
+    return quoted_post_id
+
+
+def _validate_quote_target(cursor, quoted_post_id, viewer_id):
+    """Ensure a quote target exists and is visible to the creating viewer.
+
+    Access failures intentionally collapse to PostNotFoundError so a private
+    post cannot be discovered by trying to quote it.
+    """
+    cursor.execute('SELECT id FROM posts WHERE id = %s', (quoted_post_id,))
+    if not cursor.fetchone():
+        raise PostNotFoundError('Post not found')
+    _check_post_access(cursor, quoted_post_id, viewer_id, interact=False)
+
+
+def _check_post_access(cursor, post_id, user_id, *, interact):
+    info = post_community(cursor, post_id)
+    if info is None:
+        return
+    community_id, ctype = info
+    role = viewer_role(cursor, community_id, user_id)
+    if not can_view(ctype, role):
+        raise PostNotFoundError('Post not found')
+    if interact and not can_interact(ctype, role, user_id):
+        raise PostAccessError('Join this community to ' + ('comment' if interact == 'comment' else 'like'))
+
+
+def _validate_images(files):
+    """Raise PostValidationError if any file in files is missing a
+    supported content-type/extension or exceeds MAX_IMAGE_SIZE, or if
+    there are more than MAX_IMAGES_PER_POST. Doesn't save anything -
+    pure validation, done up front so create_post never writes a
+    partial post when an image is bad.
+    """
+    if len(files) > MAX_IMAGES_PER_POST:
+        raise PostValidationError(f'A post can have at most {MAX_IMAGES_PER_POST} images.')
+
+    for file_storage in files:
+        if not file_storage or not file_storage.filename:
+            continue
+
+        if not file_storage.content_type or not file_storage.content_type.startswith('image/'):
+            raise PostValidationError('Only image files are supported.')
+
+        filename_lower = file_storage.filename.lower()
+        if not any(filename_lower.endswith(f'.{ext}') for ext in ALLOWED_IMAGE_EXTENSIONS):
+            raise PostValidationError('Only image files are supported.')
+
+        file_storage.seek(0, os.SEEK_END)
+        file_size = file_storage.tell()
+        file_storage.seek(0)
+        if file_size > MAX_IMAGE_SIZE:
+            raise PostValidationError('Each image must be under 5MB.')
+
+
+def create_post(conn, user_id, content, audience, files, community_id=None, quoted_post_id=None):
+    """Validate, insert, and save images for a new post.
+
+    audience falls back to DEFAULT_AUDIENCE for any value outside
+    VALID_AUDIENCES (silent default, not an error - matches the
+    original route's behavior for this field specifically; contrast
+    with list_posts' audience filter, which rejects an invalid value
+    instead). When community_id is set, the post belongs to that
+    community and audience is ignored (the column default fills it).
+    Returns the serialized post dict. Raises PostValidationError for
+    empty/oversized content or invalid images and PostNotFoundError when the
+    requested quote target is missing or not visible to user_id.
+    """
+    quoted_post_id = _parse_quoted_post_id(quoted_post_id)
+    content = (content or '').strip()
+    if not content:
+        raise PostValidationError('Content cannot be empty')
+    if len(content) > MAX_CONTENT_LEN:
+        raise PostValidationError(f'Post exceeds {MAX_CONTENT_LEN} character limit.')
+
+    files = [f for f in (files or [])]
+    _validate_images(files)
+
+    cursor = conn.cursor()
+    if quoted_post_id is not None:
+        # Do this before the INSERT or any file write. A private target is
+        # deliberately indistinguishable from a missing target.
+        _validate_quote_target(cursor, quoted_post_id, user_id)
+
+    if community_id is None:
+        # Main feed post: validate and use audience
+        audience = (audience or DEFAULT_AUDIENCE).strip()
+        if audience not in VALID_AUDIENCES:
+            audience = DEFAULT_AUDIENCE
+
+    saved_file_paths = []
+    try:
+        if community_id is not None:
+            # Community post: ignore audience, let the column default fill it
+            cursor.execute(
+                '''INSERT INTO posts (user_id, content, community_id, quoted_post_id)
+                   VALUES (%s, %s, %s, %s)
+                   RETURNING id''',
+                (user_id, content, community_id, quoted_post_id)
+            )
+        else:
+            cursor.execute(
+                '''INSERT INTO posts (user_id, content, audience, quoted_post_id)
+                   VALUES (%s, %s, %s, %s)
+                   RETURNING id''',
+                (user_id, content, audience, quoted_post_id)
+            )
+        post_id = cursor.fetchone()[0]
+
+        for position, file_storage in enumerate(files):
+            if file_storage and file_storage.filename:
+                file_ext = os.path.splitext(secure_filename(file_storage.filename))[1]
+                unique_filename = f"{uuid.uuid4()}{file_ext}"
+                file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
+                saved_file_paths.append(file_path)
+                file_storage.save(file_path)
+
+                image_url = f"/static/uploads/{unique_filename}"
+                cursor.execute(
+                    'INSERT INTO post_images (post_id, image_path, position) VALUES (%s, %s, %s)',
+                    (post_id, image_url, position)
+                )
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        for file_path in saved_file_paths:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        raise
+
+    cursor.execute('''
+        SELECT posts.id, posts.user_id, posts.content, posts.audience,
+               posts.created_at, posts.comment_count, posts.like_count,
+               posts.view_count, users.full_name, users.email, users.profile_picture,
+               users.username, users.bio
+        FROM posts
+        JOIN users ON posts.user_id = users.id
+        WHERE posts.id = %s
+    ''', (post_id,))
+    row = cursor.fetchone()
+
+    cursor.execute('''
+        SELECT image_path FROM post_images
+        WHERE post_id = %s
+        ORDER BY position ASC NULLS FIRST
+    ''', (post_id,))
+    image_rows = cursor.fetchall()
+
+    quoted_by_post, share_counts = fetch_post_quote_data(conn, [post_id], user_id)
+    return serialize_post(
+        row, image_rows, liked_by_user=False,
+        quoted_post=quoted_by_post.get(post_id),
+        share_count=share_counts.get(post_id, 0),
+    )
+
+
+def fetch_post_quote_data(conn, post_ids, current_user_id):
+    """Build quote payloads and share counts for a page of selected posts.
+
+    Relationship ids, original post/author rows, images, quote counts, and
+    viewer-like state are fetched in batches. Missing or viewer-inaccessible
+    originals remain an ``{id, unavailable: true}`` stub.
+    """
+    post_ids = list(dict.fromkeys(post_ids or []))
+    if not post_ids:
+        return {}, {}
+
+    cursor = conn if not hasattr(conn, 'cursor') else conn.cursor()
+    placeholders = ','.join(['%s'] * len(post_ids))
+    cursor.execute(
+        f'SELECT id, quoted_post_id FROM posts WHERE id IN ({placeholders})',
+        post_ids,
+    )
+    quote_target_by_post = {
+        post_id: quoted_id
+        for post_id, quoted_id in cursor.fetchall()
+        if quoted_id is not None
+    }
+    quote_ids = list(dict.fromkeys(quote_target_by_post.values()))
+    count_ids = list(dict.fromkeys(post_ids + quote_ids))
+    count_placeholders = ','.join(['%s'] * len(count_ids))
+    cursor.execute(
+        f'''
+        SELECT quoted_post_id, COUNT(*)
+        FROM posts
+        WHERE quoted_post_id IN ({count_placeholders})
+        GROUP BY quoted_post_id
+        ''',
+        count_ids,
+    )
+    share_counts = {post_id: int(count) for post_id, count in cursor.fetchall()}
+    payloads = {
+        post_id: {'id': quoted_id, 'unavailable': True}
+        for post_id, quoted_id in quote_target_by_post.items()
+    }
+    if not quote_ids:
+        return payloads, share_counts
+
+    quote_placeholders = ','.join(['%s'] * len(quote_ids))
+
+    # The joined author row and the same denormalized counts used by the feed
+    # are fetched in one query. The community type/member check applies the
+    # viewer's visibility to each original independently.
+    cursor.execute(
+        f'''
+        SELECT p.id, p.user_id, p.content, p.created_at,
+               p.comment_count, p.like_count,
+               u.full_name, u.email, u.profile_picture, u.username,
+               c.type,
+               CASE WHEN c.id IS NOT NULL THEN (EXISTS(
+                   SELECT 1 FROM community_members m
+                   WHERE m.community_id = c.id AND m.user_id = %s
+               ))::int ELSE 0 END AS viewer_is_member,
+               CASE WHEN likes.id IS NOT NULL THEN 1 ELSE 0 END AS liked_by_user
+        FROM posts p
+        JOIN users u ON p.user_id = u.id
+        LEFT JOIN communities c ON c.id = p.community_id
+        LEFT JOIN likes
+               ON likes.target_type = 'post'
+              AND likes.target_id = p.id
+              AND likes.user_id = %s
+        WHERE p.id IN ({quote_placeholders})
+        ''',
+        [current_user_id, current_user_id] + quote_ids,
+    )
+    originals = {}
+    for row in cursor.fetchall():
+        (
+            original_id, original_user_id, content, created_at,
+            comment_count, like_count, full_name, email, profile_picture,
+            username, community_type, viewer_is_member, liked_by_user,
+        ) = row
+        if community_type == 'private' and not viewer_is_member:
+            continue
+        originals[original_id] = {
+            'id': original_id,
+            'user_id': original_user_id,
+            'author_name': full_name,
+            'author_handle': username or email.split('@')[0],
+            'author_avatar': profile_picture,
+            'content': content,
+            'created_at': timestamp_text(created_at),
+            'like_count': like_count,
+            'comment_count': comment_count,
+            'share_count': share_counts.get(original_id, 0),
+            'liked_by_user': bool(liked_by_user),
+        }
+
+    # Images are a separate batch because post_images is one-to-many.
+    cursor.execute(
+        f'''
+        SELECT post_id, image_path
+        FROM post_images
+        WHERE post_id IN ({quote_placeholders})
+        ORDER BY post_id, position ASC NULLS FIRST
+        ''',
+        quote_ids,
+    )
+    images_by_post = {}
+    for original_id, image_path in cursor.fetchall():
+        images_by_post.setdefault(original_id, []).append(image_path)
+
+    for parent_id, quoted_id in quote_target_by_post.items():
+        original = originals.get(quoted_id)
+        if original is not None:
+            original['images'] = images_by_post.get(quoted_id, [])
+            payloads[parent_id] = original
+
+    return payloads, share_counts
+
+
+def list_posts(conn, current_user_id, audience_filter, user_id_filter, limit, cursor_id, only_community_id=None):
+    """Keyset-paginated page of posts, newest first, with joined author
+    info and per-viewer liked_by_user.
+
+    audience_filter, if non-empty, must be a member of VALID_AUDIENCES -
+    raises PostValidationError otherwise (unlike create_post's audience,
+    which silently defaults - this is a filter the caller explicitly
+    asked for, so an invalid one is their mistake to fix, not ours to
+    paper over). limit is clamped to [1, MAX_POSTS_LIMIT] by the caller
+    (see clamp_limit in app/routes/posts.py) before reaching here.
+
+    only_community_id: when set, returns posts for that community only.
+    When None (Home feed) community posts are included alongside normal
+    posts, each carrying a 'community' {slug, name} key. Posts from
+    private communities appear only for members. When user_id_filter is
+    set (profile lists) community posts stay excluded, matching the
+    profile post count.
+
+    Returns (posts, next_cursor).
+    """
+    if audience_filter and audience_filter not in VALID_AUDIENCES:
+        raise PostValidationError('Invalid audience filter')
+
+    cursor = conn.cursor()
+
+    query = '''
+        SELECT posts.id, posts.user_id, posts.content, posts.audience,
+               posts.created_at, posts.comment_count, posts.like_count,
+               posts.view_count, users.full_name, users.email, users.profile_picture,
+               users.username, users.bio,
+               CASE WHEN likes.id IS NOT NULL THEN 1 ELSE 0 END as liked_by_user
+        FROM posts
+        JOIN users ON posts.user_id = users.id
+        LEFT JOIN likes ON likes.target_type = 'post'
+                       AND likes.target_id = posts.id
+                       AND likes.user_id = %s
+    '''
+    params = [current_user_id]
+
+    # Community posts (posts.community_id set) appear in their community's
+    # feed and in the Home feed. Private-community posts are visible in the
+    # Home feed to members only. Per-author lists (profiles) exclude them.
+    where_clauses = []
+    if only_community_id is not None:
+        where_clauses.append('posts.community_id = %s')
+        params.append(only_community_id)
+    elif user_id_filter is not None:
+        where_clauses.append('posts.community_id IS NULL')
+    else:
+        where_clauses.append('''(posts.community_id IS NULL
+            OR posts.community_id IN (
+                SELECT c.id FROM communities c WHERE c.type != 'private'
+                UNION
+                SELECT m.community_id FROM community_members m WHERE m.user_id = %s
+            ))''')
+        params.append(current_user_id)
+
+    if audience_filter:
+        where_clauses.append('posts.audience = %s')
+        params.append(audience_filter)
+    if user_id_filter is not None:
+        where_clauses.append('posts.user_id = %s')
+        params.append(user_id_filter)
+    if cursor_id is not None:
+        where_clauses.append('posts.id < %s')
+        params.append(cursor_id)
+
+    query += ' WHERE ' + ' AND '.join(where_clauses)
+
+    query += ' ORDER BY posts.created_at DESC NULLS LAST, posts.id DESC LIMIT %s'
+    params.append(limit + 1)  # one extra row, to detect a next page
+
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+
+    has_next = len(rows) > limit
+    page_rows = rows[:limit]
+    next_cursor = page_rows[-1][0] if has_next and page_rows else None
+
+    if page_rows:
+        post_ids = [row[0] for row in page_rows]
+        placeholders = ','.join(['%s'] * len(post_ids))
+        cursor.execute(f'''
+            SELECT post_id, image_path
+            FROM post_images
+            WHERE post_id IN ({placeholders})
+            ORDER BY post_id, position ASC NULLS FIRST
+        ''', post_ids)
+        images_by_post = {}
+        for post_id, image_path in cursor.fetchall():
+            images_by_post.setdefault(post_id, []).append(image_path)
+        cursor.execute(f'''
+            SELECT posts.id, c.slug, c.name, c.type,
+                   EXISTS(SELECT 1 FROM community_members m
+                          WHERE m.community_id = c.id AND m.user_id = %s)
+            FROM posts
+            JOIN communities c ON c.id = posts.community_id
+            WHERE posts.id IN ({placeholders})
+        ''', [current_user_id] + post_ids)
+        community_by_post = {
+            pid: {'slug': slug, 'name': name, 'is_member': bool(is_member), 'type': ctype}
+            for pid, slug, name, ctype, is_member in cursor.fetchall()
+        }
+        quoted_by_post, share_counts = fetch_post_quote_data(
+            conn, post_ids, current_user_id
+        )
+    else:
+        images_by_post = {}
+        community_by_post = {}
+        quoted_by_post, share_counts = {}, {}
+
+    posts = []
+    for row in page_rows:
+        image_list = [(img,) for img in images_by_post.get(row[0], [])]
+        post = serialize_post(
+            row,
+            image_list,
+            row[13],
+            quoted_post=quoted_by_post.get(row[0]),
+            share_count=share_counts.get(row[0], 0),
+        )
+        if row[0] in community_by_post:
+            post['community'] = community_by_post[row[0]]
+        posts.append(post)
+
+    return posts, next_cursor
+
+
+def get_comments(conn, post_id, current_user_id):
+    """All comments on post_id, oldest first, with per-viewer
+    liked_by_user. Raises PostNotFoundError if post_id doesn't exist."""
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT id FROM posts WHERE id = %s', (post_id,))
+    if not cursor.fetchone():
+        raise PostNotFoundError('Post not found')
+    _check_post_access(cursor, post_id, current_user_id, interact=False)
+
+    cursor.execute('''
+        SELECT comments.id, comments.post_id, comments.user_id, comments.content,
+               comments.created_at, comments.like_count, comments.parent_comment_id,
+               users.full_name, users.email, users.profile_picture,
+               users.username, users.bio,
+               CASE WHEN likes.id IS NOT NULL THEN 1 ELSE 0 END as liked_by_user,
+               comments.image_path
+        FROM comments
+        JOIN users ON comments.user_id = users.id
+        LEFT JOIN likes ON likes.target_type = 'comment'
+                       AND likes.target_id = comments.id
+                       AND likes.user_id = %s
+        WHERE comments.post_id = %s
+        ORDER BY comments.created_at ASC NULLS FIRST
+    ''', (current_user_id, post_id))
+    return [serialize_comment(row) for row in cursor.fetchall()]
+
+
+def create_comment(conn, post_id, user_id, content, parent_comment_id, image_file=None):
+    """Add a comment (optionally a reply, via parent_comment_id) to
+    post_id and bump its comment_count. Optionally attach a single image.
+
+    Returns the serialized comment. Raises PostValidationError for
+    empty/oversized content (or empty content without an image), a
+    parent_comment_id belonging to a different post, or invalid image;
+    PostNotFoundError if post_id doesn't exist; CommentNotFoundError if
+    parent_comment_id is given but doesn't exist.
+    """
+    content = (content or '').strip()
+
+    # Content check: empty content is an error only when image_file is absent
+    if not content and not image_file:
+        raise PostValidationError('Content cannot be empty')
+    if content and len(content) > MAX_COMMENT_LEN:
+        raise PostValidationError(f'Content too long (max {MAX_COMMENT_LEN} characters)')
+
+    # Validate image before writing anything (no partial comment on bad image)
+    if image_file and image_file.filename:
+        _validate_images([image_file])
+
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT id FROM posts WHERE id = %s', (post_id,))
+    if not cursor.fetchone():
+        raise PostNotFoundError('Post not found')
+    _check_post_access(cursor, post_id, user_id, interact='comment')
+
+    if parent_comment_id is not None:
+        cursor.execute('SELECT post_id FROM comments WHERE id = %s', (parent_comment_id,))
+        parent_row = cursor.fetchone()
+        if not parent_row:
+            raise CommentNotFoundError('Parent comment not found')
+        if parent_row[0] != post_id:
+            raise PostValidationError('Parent comment belongs to a different post')
+
+    # Save the image file if provided
+    image_url = None
+    saved_file_path = None
+    if image_file and image_file.filename:
+        file_ext = os.path.splitext(secure_filename(image_file.filename))[1]
+        unique_filename = f"{uuid.uuid4()}{file_ext}"
+        saved_file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
+        image_file.save(saved_file_path)
+        image_url = f"/static/uploads/{unique_filename}"
+
+    # Insert empty string for image-only comments (column is NOT NULL)
+    comment_content = content if content else ''
+
+    try:
+        cursor.execute(
+            'INSERT INTO comments (post_id, user_id, content, parent_comment_id, image_path) VALUES (%s, %s, %s, %s, %s) RETURNING id',
+            (post_id, user_id, comment_content, parent_comment_id, image_url)
+        )
+        comment_id = cursor.fetchone()[0]
+
+        cursor.execute(
+            'UPDATE posts SET comment_count = comment_count + 1 WHERE id = %s',
+            (post_id,)
+        )
+        conn.commit()
+    except Exception:
+        # If DB insert fails after file was written, delete the file
+        if saved_file_path and os.path.exists(saved_file_path):
+            os.remove(saved_file_path)
+        raise
+
+    cursor.execute('''
+        SELECT comments.id, comments.post_id, comments.user_id, comments.content,
+               comments.created_at, comments.like_count, comments.parent_comment_id,
+               users.full_name, users.email, users.profile_picture,
+               users.username, users.bio, comments.image_path
+        FROM comments
+        JOIN users ON comments.user_id = users.id
+        WHERE comments.id = %s
+    ''', (comment_id,))
+    return serialize_comment(cursor.fetchone())
+
+
+def _toggle_like(conn, user_id, target_type, target_id, table, exists_query, not_found_error):
+    """Shared like/unlike logic for posts and comments - same table
+    (likes) and same race-handling shape for both, differing only in
+    target_type and which table's like_count to adjust.
+    """
+    cursor = conn.cursor()
+
+    cursor.execute(exists_query + ' FOR UPDATE', (target_id,))
+    if not cursor.fetchone():
+        raise not_found_error()
+
+    cursor.execute('''
+        DELETE FROM likes
+        WHERE user_id = %s AND target_type = %s AND target_id = %s
+        RETURNING id
+    ''', (user_id, target_type, target_id))
+    if cursor.fetchone() is not None:
+        cursor.execute(f'UPDATE {table} SET like_count = like_count - 1 WHERE id = %s', (target_id,))
+        liked = False
+    else:
+        cursor.execute('''
+            INSERT INTO likes (user_id, target_type, target_id)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, target_type, target_id) DO NOTHING
+            RETURNING id
+        ''', (user_id, target_type, target_id))
+        if cursor.fetchone() is not None:
+            cursor.execute(f'UPDATE {table} SET like_count = like_count + 1 WHERE id = %s', (target_id,))
+        liked = True
+
+    conn.commit()
+
+    cursor.execute(f'SELECT like_count FROM {table} WHERE id = %s', (target_id,))
+    like_count = cursor.fetchone()[0]
+
+    return liked, like_count
+
+
+def toggle_post_like(conn, user_id, post_id):
+    """Like/unlike a post. Returns (liked, like_count). Raises
+    PostNotFoundError if post_id doesn't exist."""
+    cursor = conn.cursor()
+    cursor.execute('SELECT id FROM posts WHERE id = %s', (post_id,))
+    if not cursor.fetchone(): raise PostNotFoundError('Post not found')
+    _check_post_access(cursor, post_id, user_id, interact='like')
+    return _toggle_like(
+        conn, user_id, 'post', post_id, 'posts',
+        'SELECT id FROM posts WHERE id = %s',
+        lambda: PostNotFoundError('Post not found'),
+    )
+
+
+def toggle_comment_like(conn, user_id, comment_id):
+    """Like/unlike a comment. Returns (liked, like_count). Raises
+    CommentNotFoundError if comment_id doesn't exist."""
+    cursor = conn.cursor()
+    cursor.execute('SELECT post_id FROM comments WHERE id = %s', (comment_id,))
+    row = cursor.fetchone()
+    if not row: raise CommentNotFoundError('Comment not found')
+    try:
+        _check_post_access(cursor, row[0], user_id, interact='like')
+    except PostNotFoundError:
+        raise CommentNotFoundError('Comment not found')
+    return _toggle_like(
+        conn, user_id, 'comment', comment_id, 'comments',
+        'SELECT id FROM comments WHERE id = %s',
+        lambda: CommentNotFoundError('Comment not found'),
+    )
+
+
+def delete_comment(conn, user_id, comment_id):
+    """Delete a comment. Because comments.parent_comment_id cascades
+    (see migrations/002_comment_delete_cascade.sql), deleting a comment
+    also deletes every reply beneath it, recursively - so this first
+    walks the full descendant subtree to (a) clean up their `likes`
+    rows, which the cascade can't reach (likes has no FK to comments -
+    target_id is a polymorphic reference, not an enforced relationship),
+    (b) decrement the post's comment_count by the true number of
+    rows removed, not just 1, and (c) delete any image files attached
+    to comments in the subtree.
+
+    Raises CommentNotFoundError if comment_id doesn't exist,
+    CommentOwnershipError if it isn't user_id's comment.
+    """
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT user_id, post_id FROM comments WHERE id = %s', (comment_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise CommentNotFoundError('Comment not found')
+
+    comment_user_id, post_id = row
+    if user_id != comment_user_id:
+        raise CommentOwnershipError('Forbidden')
+
+    cursor.execute('''
+        WITH RECURSIVE subtree(id) AS (
+            SELECT id FROM comments WHERE id = %s
+            UNION ALL
+            SELECT c.id FROM comments c JOIN subtree s ON c.parent_comment_id = s.id
+        )
+        SELECT id FROM subtree
+    ''', (comment_id,))
+    subtree_ids = [r[0] for r in cursor.fetchall()]
+
+    # Fetch image paths before deleting
+    placeholders = ','.join(['%s'] * len(subtree_ids))
+    cursor.execute(
+        f"SELECT image_path FROM comments WHERE id IN ({placeholders})",
+        subtree_ids
+    )
+    image_paths = [r[0] for r in cursor.fetchall() if r[0]]
+
+    cursor.execute(
+        f"DELETE FROM likes WHERE target_type = 'comment' AND target_id IN ({placeholders})",
+        subtree_ids
+    )
+
+    # Deleting just the root row - ON DELETE CASCADE removes every
+    # reply beneath it automatically.
+    cursor.execute('DELETE FROM comments WHERE id = %s', (comment_id,))
+
+    cursor.execute(
+        'UPDATE posts SET comment_count = GREATEST(0, comment_count - %s) WHERE id = %s',
+        (len(subtree_ids), post_id)
+    )
+    conn.commit()
+
+    # Delete image files after successful commit
+    for image_path in image_paths:
+        if image_path.startswith('/static/uploads/'):
+            filename = image_path.replace('/static/uploads/', '')
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+
+def delete_post(conn, user_id, post_id):
+    """Delete a post and everything that depends on it: its images
+    (row + on-disk files), its comments (including their image files),
+    and all likes on both the post and its comments. Raises
+    PostNotFoundError if post_id doesn't exist, PostOwnershipError if it
+    isn't user_id's post.
+    """
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT user_id FROM posts WHERE id = %s', (post_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise PostNotFoundError('Post not found')
+
+    if row[0] != user_id:
+        raise PostOwnershipError('You can only delete your own posts')
+
+    # Collect post images
+    cursor.execute('SELECT image_path FROM post_images WHERE post_id = %s', (post_id,))
+    post_image_paths = [r[0] for r in cursor.fetchall()]
+
+    # Collect comment images before deleting comments
+    cursor.execute('SELECT image_path FROM comments WHERE post_id = %s AND image_path IS NOT NULL', (post_id,))
+    comment_image_paths = [r[0] for r in cursor.fetchall()]
+
+    cursor.execute('DELETE FROM post_images WHERE post_id = %s', (post_id,))
+
+    cursor.execute('''
+        DELETE FROM likes
+        WHERE target_type = 'comment'
+        AND target_id IN (SELECT id FROM comments WHERE post_id = %s)
+    ''', (post_id,))
+
+    cursor.execute('DELETE FROM comments WHERE post_id = %s', (post_id,))
+
+    cursor.execute('''
+        DELETE FROM likes
+        WHERE target_type = 'post' AND target_id = %s
+    ''', (post_id,))
+
+    cursor.execute('DELETE FROM posts WHERE id = %s', (post_id,))
+
+    conn.commit()
+
+    # Delete post image files after successful commit
+    for image_path in post_image_paths:
+        if image_path.startswith('/static/uploads/'):
+            filename = image_path.replace('/static/uploads/', '')
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+    # Delete comment image files after successful commit
+    for image_path in comment_image_paths:
+        if image_path.startswith('/static/uploads/'):
+            filename = image_path.replace('/static/uploads/', '')
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            if os.path.exists(file_path):
+                os.remove(file_path)

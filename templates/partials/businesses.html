@@ -1,0 +1,165 @@
+	<!-- BEGIN: Businesses View -->
+		<div id="businesses-view" class="view-section bg-white min-h-screen relative">
+			<!-- BEGIN: Main Header -->
+			<header class="bg-white sticky top-0 z-10 w-full shadow-sm">
+				<div class="flex items-center gap-3 px-4 py-3.5">
+					<button type="button" aria-label="Back" onclick="closeBusinessesView()" class="p-1 -ml-1 text-gray-900 hover:opacity-80 transition-opacity active:scale-95 duration-100">
+						<svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+							<path d="m15 18-6-6 6-6" stroke-linecap="round" stroke-linejoin="round"></path>
+						</svg>
+					</button>
+					<h1 class="text-lg font-bold text-gray-900">Businesses</h1>
+				</div>
+			</header>
+			<!-- END: Main Header -->
+
+			<!-- BEGIN: Search Overlay -->
+			<div class="fixed inset-0 z-40 bg-black/10 hidden transition-opacity" id="search-backdrop" onclick="toggleSearch()"></div>
+			<div class="absolute top-[68px] left-0 right-0 z-50 bg-white rounded-[24px] shadow-[0_8px_24px_rgba(0,0,0,0.12)] p-4 pb-6 mx-4 hidden transition-all origin-top" id="search-overlay">
+				<div class="w-12 h-1 bg-gray-200 rounded-full mx-auto mb-5"></div>
+				<div class="flex items-center gap-3 mb-6">
+					<div class="flex-grow flex items-center bg-gray-50 rounded-[12px] px-3 py-2.5">
+						<i class="fas fa-magnifying-glass text-gray-400 text-[18px] mr-2"></i>
+						<input autofocus class="bg-transparent border-none outline-none text-sm w-full p-0 text-gray-800 placeholder:text-gray-400 focus:ring-0" placeholder="Search businesses..." type="text"/>
+					</div>
+					<button class="text-gray-500 text-sm font-medium px-2" onclick="toggleSearch()">Cancel</button>
+				</div>
+				<div class="mb-6">
+					<div class="flex items-center justify-between mb-3">
+						<h3 class="text-sm font-bold text-gray-500">Recent searches</h3>
+						<button class="text-sm font-medium text-brand-red">Clear all</button>
+					</div>
+					<div class="flex flex-wrap gap-2">
+						<button class="flex items-center bg-gray-50 text-gray-800 px-3 py-1.5 rounded-full text-sm">
+							<i class="far fa-clock text-[14px] text-gray-400 mr-1.5"></i> steak
+						</button>
+						<button class="flex items-center bg-gray-50 text-gray-800 px-3 py-1.5 rounded-full text-sm">
+							<i class="far fa-clock text-[14px] text-gray-400 mr-1.5"></i> mart
+						</button>
+						<button class="flex items-center bg-gray-50 text-gray-800 px-3 py-1.5 rounded-full text-sm">
+							<i class="far fa-clock text-[14px] text-gray-400 mr-1.5"></i> charging station
+						</button>
+						<button class="flex items-center bg-gray-50 text-gray-800 px-3 py-1.5 rounded-full text-sm">
+							<i class="far fa-clock text-[14px] text-gray-400 mr-1.5"></i> tech services
+						</button>
+					</div>
+				</div>
+				<div>
+					<h3 class="text-sm font-bold text-gray-500 mb-3">Popular searches</h3>
+					<div class="flex flex-wrap gap-2">
+						<button class="flex items-center bg-gray-50 text-gray-800 px-3 py-1.5 rounded-full text-sm">
+							<i class="fas fa-utensils text-[14px] text-brand-red mr-1.5"></i> Restaurants
+						</button>
+						<button class="flex items-center bg-gray-50 text-gray-800 px-3 py-1.5 rounded-full text-sm">
+							<i class="fas fa-bag-shopping text-[14px] text-brand-red mr-1.5"></i> Shops
+						</button>
+						<button class="flex items-center bg-gray-50 text-gray-800 px-3 py-1.5 rounded-full text-sm">
+							<i class="fas fa-screwdriver-wrench text-[14px] text-brand-red mr-1.5"></i> Services
+						</button>
+						<button class="flex items-center bg-gray-50 text-gray-800 px-3 py-1.5 rounded-full text-sm">
+							<i class="fas fa-bolt text-[14px] text-brand-red mr-1.5"></i> Charging Stations
+						</button>
+					</div>
+				</div>
+			</div>
+			<!-- END: Search Overlay -->
+
+			<!-- BEGIN: Filter Bar -->
+			<nav class="px-5 py-4 mb-2 flex items-center justify-between">
+				<div class="flex overflow-x-auto no-scrollbar space-x-2 pb-2 flex-1">
+					<button class="bg-red-50 text-brand-red px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap">All</button>
+					<button class="bg-gray-50 text-gray-600 px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap hover:bg-gray-100 transition-colors">Restaurants</button>
+					<button class="bg-gray-50 text-gray-600 px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap hover:bg-gray-100 transition-colors">Shops</button>
+					<button class="bg-gray-50 text-gray-600 px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap hover:bg-gray-100 transition-colors">Services</button>
+					<button class="bg-gray-50 text-gray-600 px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap hover:bg-gray-100 transition-colors">Charging</button>
+				</div>
+				<div class="flex items-center space-x-4 text-gray-800 ml-4 pb-2">
+					<button aria-label="Search" onclick="toggleSearch()">
+						<svg class="w-6 h-6" fill="none" stroke="currentColor" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+							<path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+						</svg>
+					</button>
+					<button aria-label="Filter">
+						<svg class="w-6 h-6" fill="none" stroke="currentColor" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+							<path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+						</svg>
+					</button>
+				</div>
+			</nav>
+			<!-- END: Filter Bar -->
+
+			<!-- BEGIN: Business List -->
+			<!-- Render target: clone #business-card-template once per business and append here. -->
+			<main id="business-list" class="px-4 space-y-4 pb-24"></main>
+
+			<!-- Business card template (inert; not rendered). Fill elements marked data-field.
+			     Stars: 5 icons; use "fas fa-star" (full), "fas fa-star-half-alt" (half), "far fa-star text-gray-200" (empty).
+			     Features row: hide when empty; clone #business-feature-available / #business-feature-unavailable per item. -->
+			<template id="business-card-template">
+				<article class="flex flex-row bg-white rounded-[16px] border border-gray-100 p-3 gap-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+					<img data-field="image" alt="" class="w-[120px] h-[120px] rounded-[12px] object-cover bg-gray-100"/>
+					<div class="flex flex-col justify-between py-1 w-full">
+						<div>
+							<h2 data-field="name" class="text-base font-bold text-gray-900 mb-0.5"></h2>
+							<p data-field="category" class="text-sm text-gray-500 mb-1"></p>
+							<div class="flex items-center text-sm mb-2">
+								<span data-field="rating" class="font-bold mr-1"></span>
+								<div data-field="stars" class="flex text-[#FFB400] text-sm">
+									<i class="fas fa-star text-[16px]"></i>
+									<i class="fas fa-star text-[16px]"></i>
+									<i class="fas fa-star text-[16px]"></i>
+									<i class="fas fa-star text-[16px]"></i>
+									<i class="far fa-star text-[16px] text-gray-200"></i>
+								</div>
+								<span data-field="review-count" class="text-gray-500 ml-1 text-xs"></span>
+							</div>
+							<div class="flex items-center text-sm text-gray-500 mb-2">
+								<i class="fas fa-map-marker-alt text-[16px] mr-1"></i>
+								<span data-field="address" class="truncate text-xs"></span>
+							</div>
+						</div>
+						<div data-field="features" class="flex flex-wrap gap-x-3 gap-y-1 text-xs"></div>
+					</div>
+				</article>
+			</template>
+
+			<!-- Feature item templates (appended into [data-field="features"]) -->
+			<template id="business-feature-available">
+				<span class="flex items-center text-gray-500"><i class="fas fa-check text-[14px] text-green-500 mr-0.5"></i> <span data-field="label"></span></span>
+			</template>
+			<template id="business-feature-unavailable">
+				<span class="flex items-center text-gray-500"><i class="fas fa-times text-[14px] text-red-500 mr-0.5"></i> <span data-field="label"></span></span>
+			</template>
+			<!-- END: Business List -->
+
+			<!-- BEGIN: Footer Divider -->
+			<footer id="business-list-footer" class="hidden mt-8 flex items-center justify-center mb-4">
+				<div class="h-px bg-gray-100 w-12"></div>
+				<span class="text-sm text-gray-400 px-4">No more businesses</span>
+				<div class="h-px bg-gray-100 w-12"></div>
+			</footer>
+			<!-- END: Footer Divider -->
+
+			<!-- BEGIN: Business FABs -->
+			<!-- Two edge-merged expandable pill FABs, stacked bottom-right: "Create" (red) and "My Stores" (blue) 12px above it. Same right inset as #compose-fab; bottom is 32px (not nav-offset) because the bottom nav is hidden on this view; 32px matches the gap #compose-fab and #chat-fab keep above the nav, so the pill sits clear of the screen edge and gesture bar. Both start retracted (only the icon peeks past the right edge); first tap expands, second tap on the icon/label runs the global function named in data-action, and the X on the right collapses the pill back to the edge (wire the flows by defining openBusinessCreate() / openMyStores()). State, locking and reset-on-open live in onBusinessFabClick()/onBusinessFabCollapse()/resetBusinessFabs() (core.js); the retracted offset is .business-fab.is-retracted in style.css. Visibility follows #businesses-view (.view-section is display:none unless active), so no core.js toggle is needed. -->
+			<div id="business-stores-fab" data-action="openMyStores" class="business-fab is-retracted fixed h-10 pr-1 bg-blue-600 text-white rounded-full card-shadow flex items-center hover:bg-blue-700 transition-colors z-9 font-semibold text-[15px]" style="bottom: calc(84px + env(safe-area-inset-bottom, 0px)); right: 20px;">
+				<button type="button" class="business-fab-main h-full pl-5 pr-2 gap-2 rounded-full flex items-center" onclick="onBusinessFabClick(this)" aria-expanded="false" aria-label="My Stores">
+					<svg class="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 256 256" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M232,96a7.89,7.89,0,0,0-.3-2.2L217.35,43.6A16.07,16.07,0,0,0,202,32H54A16.07,16.07,0,0,0,38.65,43.6L24.31,93.8A7.89,7.89,0,0,0,24,96h0v16a40,40,0,0,0,16,32v72a8,8,0,0,0,8,8H208a8,8,0,0,0,8-8V144a40,40,0,0,0,16-32V96ZM54,48H202l11.42,40H42.61Zm50,56h48v8a24,24,0,0,1-48,0Zm-16,0v8a24,24,0,0,1-35.12,21.26,7.88,7.88,0,0,0-1.82-1.06A24,24,0,0,1,40,112v-8ZM200,208H56V151.2a40.57,40.57,0,0,0,8,.8,40,40,0,0,0,32-16,40,40,0,0,0,64,0,40,40,0,0,0,32,16,40.57,40.57,0,0,0,8-.8Zm4.93-75.8a8.08,8.08,0,0,0-1.8,1.05A24,24,0,0,1,168,112v-8h48v8A24,24,0,0,1,204.93,132.2Z"></path></svg>
+					<span>My Stores</span>
+				</button>
+				<button type="button" class="business-fab-cancel w-8 h-8 shrink-0 rounded-full flex items-center justify-center" onclick="onBusinessFabCollapse(this)" aria-label="Collapse My Stores">
+					<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 256 256" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M165.66,101.66,139.31,128l26.35,26.34a8,8,0,0,1-11.32,11.32L128,139.31l-26.34,26.35a8,8,0,0,1-11.32-11.32L116.69,128,90.34,101.66a8,8,0,0,1,11.32-11.32L128,116.69l26.34-26.35a8,8,0,0,1,11.32,11.32ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z"></path></svg>
+				</button>
+			</div>
+			<div id="business-create-fab" data-action="openBusinessCreate" class="business-fab is-retracted fixed h-10 pr-1 bg-brand-red text-white rounded-full card-shadow flex items-center hover:bg-red-700 transition-colors z-9 font-semibold text-[15px]" style="bottom: calc(32px + env(safe-area-inset-bottom, 0px)); right: 20px;">
+				<button type="button" class="business-fab-main h-full pl-5 pr-2 gap-2 rounded-full flex items-center" onclick="onBusinessFabClick(this)" aria-expanded="false" aria-label="Create business">
+					<i class="fa-solid fa-plus text-base"></i>
+					<span>Create</span>
+				</button>
+				<button type="button" class="business-fab-cancel w-8 h-8 shrink-0 rounded-full flex items-center justify-center" onclick="onBusinessFabCollapse(this)" aria-label="Collapse Create">
+					<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 256 256" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M165.66,101.66,139.31,128l26.35,26.34a8,8,0,0,1-11.32,11.32L128,139.31l-26.34,26.35a8,8,0,0,1-11.32-11.32L116.69,128,90.34,101.66a8,8,0,0,1,11.32-11.32L128,116.69l26.34-26.35a8,8,0,0,1,11.32,11.32ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z"></path></svg>
+				</button>
+			</div>
+			<!-- END: Business FABs -->
+		</div>
+		<!-- END: Businesses View -->
