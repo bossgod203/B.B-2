@@ -309,11 +309,12 @@ def serialize_business(row):
     """Convert a businesses row into a JSON-serializable dict.
 
     Row order: id, owner_id, name, category, location, description, hours,
-    services, contact, social, created_at. The JSONB columns arrive from
-    psycopg already decoded (dict / list).
+    services, contact, social, avatar_image, banner_image, created_at. The
+    JSONB columns arrive from psycopg already decoded (dict / list).
     """
     (business_id, owner_id, name, category, location, description,
-     hours, services, contact, social, created_at) = row[:11]
+     hours, services, contact, social, avatar_image, banner_image,
+     created_at) = row[:13]
 
     return {
         'id': business_id,
@@ -326,5 +327,7 @@ def serialize_business(row):
         'services': services or [],
         'contact': contact or {},
         'social': social or {},
+        'avatar_url': avatar_image,
+        'banner_url': banner_image,
         'created_at': timestamp_text(created_at),
     }

@@ -11,6 +11,7 @@ import re
 from psycopg.types.json import Jsonb
 
 from app.serializers import serialize_business
+from app.upload_utils import delete_if_local
 
 VALID_CATEGORIES = [
     'Food & Drinks', 'Fashion & Clothing', 'Beauty & Personal Care',
@@ -34,11 +35,20 @@ _WEBSITE_RE = re.compile(r'^(https?://)?[^\s./]+(\.[^\s./]+)+(/\S*)?$', re.IGNOR
 LIST_LIMIT = 50
 
 _COLUMNS = ('id, owner_id, name, category, location, description, '
-            'hours, services, contact, social, created_at')
+            'hours, services, contact, social, avatar_image, banner_image, '
+            'created_at')
 
 
 class BusinessValidationError(Exception):
     """A 400: bad input. str(err) is the user-facing message."""
+
+
+class BusinessPermissionError(Exception):
+    """A 403: the business exists but belongs to another user."""
+
+
+class BusinessNotFoundError(Exception):
+    """A 404: no business exists with the requested id."""
 
 
 def _text(value, label, minimum, maximum):
@@ -197,3 +207,49 @@ def list_businesses(conn, owner_id=None):
     rows = cursor.fetchall()
     conn.rollback()  # end the read transaction before the connection is pooled
     return [serialize_business(row) for row in rows]
+
+
+def update_business_image(conn, business_id, user_id, kind, file_storage):
+    """Validate, save, and replace a business avatar or banner image."""
+    from app import user_service
+
+    columns = {'avatar': 'avatar_image', 'banner': 'banner_image'}
+    if kind not in columns:
+        raise BusinessValidationError('Image kind must be avatar or banner.')
+
+    column = columns[kind]
+    cursor = conn.cursor()
+    cursor.execute(
+        f'SELECT owner_id, {column} FROM businesses WHERE id = %s',
+        (business_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        conn.rollback()
+        raise BusinessNotFoundError('Business not found.')
+    if row[0] != user_id:
+        conn.rollback()
+        raise BusinessPermissionError('You can only change images for your own business.')
+
+    try:
+        user_service._validate_image_file(file_storage)
+    except user_service.UserValidationError as e:
+        conn.rollback()
+        raise BusinessValidationError(str(e))
+
+    old_url = row[1]
+    new_url = user_service._save_upload(file_storage)
+    try:
+        cursor.execute(
+            f'UPDATE businesses SET {column} = %s WHERE id = %s RETURNING {_COLUMNS}',
+            (new_url, business_id),
+        )
+        business = serialize_business(cursor.fetchone())
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        delete_if_local(new_url, user_service.UPLOAD_FOLDER)
+        raise
+
+    delete_if_local(old_url, user_service.UPLOAD_FOLDER)
+    return business

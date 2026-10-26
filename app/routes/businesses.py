@@ -1,4 +1,4 @@
-"""Business profile HTTP layer: create and list.
+"""Business profile HTTP layer: create, list, and image uploads.
 
 Validation and queries live in app/business_service.py; this file only
 translates between HTTP (request parsing, status codes) and that service.
@@ -55,6 +55,36 @@ def get_businesses():
     conn = get_db()
     try:
         return _json({'businesses': biz.list_businesses(conn, owner_id)})
+    except PoolTimeout:
+        raise
+    except Exception:
+        return _json({'error': 'Something went wrong. Please try again.'}, 500)
+    finally:
+        conn.close()
+
+
+@bp.route('/api/businesses/<int:business_id>/image', methods=['POST'])
+def update_business_image(business_id):
+    """Replace an owner-controlled business avatar or banner."""
+    if 'user_id' not in session:
+        return _json({'error': 'Authentication required'}, 401)
+
+    conn = get_db()
+    try:
+        business = biz.update_business_image(
+            conn,
+            business_id,
+            session['user_id'],
+            request.form.get('kind'),
+            request.files.get('file'),
+        )
+        return _json({'business': business})
+    except biz.BusinessValidationError as e:
+        return _json({'error': str(e)}, 400)
+    except biz.BusinessPermissionError as e:
+        return _json({'error': str(e)}, 403)
+    except biz.BusinessNotFoundError as e:
+        return _json({'error': str(e)}, 404)
     except PoolTimeout:
         raise
     except Exception:
